@@ -143,6 +143,8 @@ main {
 .source-badge { margin-right: 8px; padding: 3px 7px; border-radius: 4px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
 .source-badge.live { color: #075c32; background: #dff5e8; }
 .source-badge.static { color: #594400; background: #fff1bd; }
+.session-label { color: #6b7280; font-size: 13px; }
+.provenance-label { display: inline-block; padding: 3px 7px; border-radius: 4px; background: #eef1f5; color: #4b5563; font-size: 12px; font-weight: 700; }
 .fresh { color: #167142; font-weight: 700; }
 .stale { color: #a62b2b; font-weight: 800; }
 .reset-panel summary { cursor: pointer; font-weight: 700; }
