@@ -16,3 +16,4 @@ typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.52.3
 pytest==8.4.2
+websockets==16.1.1

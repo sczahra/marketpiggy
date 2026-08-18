@@ -6,13 +6,18 @@
     <title>MarketPiggy</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
 </head>
-<body>
+<body data-live-provider="{{ 'true' if provider_status.live else 'false' }}">
 <header class="topbar">
     <div><h1>MarketPiggy</h1><p class="subtitle">Local crypto simulator</p></div>
     <div class="paper-badge">PAPER TRADING</div>
 </header>
 <main>
-    <section class="warning">Simulation only. No brokerage connection or real-money execution exists.</section>
+    <section class="warning">Simulation only. Live data never places exchange or brokerage orders.</section>
+    <section id="provider-status" class="provider-status {{ 'connected' if provider_status.connected else 'disconnected' }}">
+        <div><span class="source-badge {{ 'live' if provider_status.live else 'static' }}">{{ 'LIVE' if provider_status.live else 'STATIC' }}</span> <strong id="provider-name">{{ provider_status.name }}</strong></div>
+        <div id="connection-state">{{ 'Connected' if provider_status.connected else 'Disconnected / connecting' }}{% if provider_status.last_update %} • Last update {{ provider_status.last_update.strftime('%H:%M:%S') }} UTC{% endif %}</div>
+        {% if provider_status.error %}<small id="provider-error">{{ provider_status.error }}</small>{% else %}<small id="provider-error"></small>{% endif %}
+    </section>
     {% if message %}<section class="flash success">{{ message }}</section>{% endif %}
     {% if error %}<section class="flash error">{{ error }}</section>{% endif %}
 
@@ -29,9 +34,7 @@
         <summary>Start or reset simulation</summary>
         <p>Choose a new paper balance. This resets current cash, holdings, cost basis, and P/L. <strong>Existing trade history is preserved.</strong></p>
         <form method="post" action="/simulation/reset" class="reset-form">
-            <label>New starting balance
-                <span class="money-input"><span>$</span><input name="starting_balance" type="number" min="0.01" max="1000000000" step="0.01" value="10.00" required></span>
-            </label>
+            <label>New starting balance <span class="money-input"><span>$</span><input name="starting_balance" type="number" min="0.01" max="1000000000" step="0.01" value="10.00" required></span></label>
             <label class="confirmation"><input name="confirm_reset" type="checkbox" value="yes" required> I understand the current portfolio state and P/L will be reset.</label>
             <button class="reset-button" type="submit">Start New Simulation</button>
         </form>
@@ -40,34 +43,41 @@
 
     {% if portfolio.symbol %}
     <section class="panel close-panel">
-        <div><h2>Open {{ portfolio.symbol }} Position</h2><p>Marked at the current bid. Sells fill at bid minus {{ "%.3f"|format(friction_rate * 100) }}% friction.</p></div>
+        <div><h2>Open {{ portfolio.symbol }} Position</h2><p>Marked at the latest bid. {% if provider_status.live %}A stale or disconnected feed blocks selling after {{ stale_after_seconds|int }} seconds.{% else %}Static mode remains explicitly simulated and available offline.{% endif %}</p></div>
         <form method="post" action="/trade/sell" class="trade-form">
             <input type="hidden" name="symbol" value="{{ portfolio.symbol }}">
             <label>Quantity <input name="quantity" type="number" min="0" max="{{ portfolio.quantity }}" step="any" value="{{ portfolio.quantity }}" required></label>
-            <button class="sell-button" type="submit">Sell / Close</button>
+            <button class="sell-button" data-held-symbol="{{ portfolio.symbol }}" type="submit" {% if not held_quote or held_quote.stale %}disabled{% endif %}>Sell / Close</button>
         </form>
     </section>
     {% endif %}
 
     <section class="panel">
-        <div class="panel-heading"><div><h2>Market</h2><p>Fake local quotes. Buys fill at ask plus {{ "%.3f"|format(friction_rate * 100) }}% friction.</p></div></div>
+        <div class="panel-heading"><div><h2>Market Scanner</h2><p>60-second return and interval-return volatility. Configured: {{ configured_symbols|join(', ') }}.</p></div></div>
         <div class="table-wrap"><table>
-            <thead><tr><th>Symbol</th><th>Bid</th><th>Ask</th><th>Midpoint</th><th>Spread</th><th>Paper Buy</th></tr></thead>
-            <tbody>{% for quote in quotes %}<tr>
-                <td><strong>{{ quote.symbol }}</strong></td><td>${{ "%.6f"|format(quote.bid) }}</td><td>${{ "%.6f"|format(quote.ask) }}</td><td>${{ "%.6f"|format(quote.midpoint) }}</td><td>{{ "%.3f"|format(quote.spread_pct) }}%</td>
-                <td><form method="post" action="/trade/buy" class="inline-form"><input type="hidden" name="symbol" value="{{ quote.symbol }}"><label class="sr-only" for="amount-{{ quote.symbol }}">Dollar amount</label><input id="amount-{{ quote.symbol }}" name="dollars" type="number" min="0.01" max="{{ portfolio.cash }}" step="0.01" value="{{ "%.2f"|format(portfolio.cash) }}" required><button type="submit" {% if portfolio.cash <= 0 or (portfolio.symbol and portfolio.symbol != quote.symbol) %}disabled{% endif %}>Buy</button></form></td>
-            </tr>{% endfor %}</tbody>
+            <thead><tr><th>Symbol</th><th>Bid</th><th>Ask</th><th>Spread</th><th>60s Return</th><th>Volatility</th><th>Age / Status</th><th>Paper Buy</th></tr></thead>
+            <tbody id="market-rows">
+            {% for row in rows %}{% set quote = row.quote %}<tr data-symbol="{{ quote.symbol }}">
+                <td><strong>{{ quote.symbol }}</strong></td>
+                <td data-field="bid">${{ "%.6f"|format(quote.bid) }}</td>
+                <td data-field="ask">${{ "%.6f"|format(quote.ask) }}</td>
+                <td data-field="spread">{{ "%.3f"|format(quote.spread_pct) }}%</td>
+                <td data-field="return">{{ "%+.3f"|format(row.short_return_pct) }}%</td>
+                <td data-field="volatility">{{ "%.3f"|format(row.volatility_pct) }}%</td>
+                <td data-field="status" class="{{ 'stale' if quote.stale else 'fresh' }}">{{ "%.1f"|format(quote.age_seconds) }}s • {{ 'STALE' if quote.stale else 'Fresh' }}</td>
+                <td><form method="post" action="/trade/buy" class="inline-form"><input type="hidden" name="symbol" value="{{ quote.symbol }}"><label class="sr-only" for="amount-{{ quote.symbol }}">Dollar amount</label><input id="amount-{{ quote.symbol }}" name="dollars" type="number" min="0.01" max="{{ portfolio.cash }}" step="0.01" value="{{ "%.2f"|format(portfolio.cash) }}" required><button data-trade-button data-account-disabled="{{ 'true' if portfolio.cash <= 0 or (portfolio.symbol and portfolio.symbol != quote.symbol) else 'false' }}" type="submit" {% if quote.stale or portfolio.cash <= 0 or (portfolio.symbol and portfolio.symbol != quote.symbol) %}disabled{% endif %}>Buy</button></form></td>
+            </tr>{% endfor %}
+            {% if not rows %}<tr id="waiting-row"><td colspan="8" class="empty-state">Waiting for live quotes. Trading remains disabled until fresh bid/ask data arrives.</td></tr>{% endif %}
+            </tbody>
         </table></div>
     </section>
 
     <section class="panel">
-        <div class="panel-heading"><div><h2>Trade Log</h2><p>Persisted simulated executions from all simulations, newest first.</p></div></div>
-        {% if trades %}<div class="table-wrap"><table>
-            <thead><tr><th>Time (UTC)</th><th>Side</th><th>Asset</th><th>Quantity</th><th>Execution</th><th>Raw Bid / Ask</th><th>Cash After</th></tr></thead>
-            <tbody>{% for trade in trades %}<tr><td>{{ trade.timestamp[:19].replace("T", " ") }}</td><td><strong class="{{ trade.side|lower }}">{{ trade.side }}</strong></td><td>{{ trade.symbol }}</td><td>{{ "%.10f"|format(trade.quantity) }}</td><td>${{ "%.6f"|format(trade.execution_price) }}</td><td>${{ "%.6f"|format(trade.raw_bid) }} / ${{ "%.6f"|format(trade.raw_ask) }}</td><td>${{ "%.2f"|format(trade.resulting_cash) }}</td></tr>{% endfor %}</tbody>
-        </table></div>{% else %}<div class="empty-state">No trades yet.</div>{% endif %}
+        <div class="panel-heading"><div><h2>Trade Log</h2><p>Persisted paper executions from all simulations, newest first.</p></div></div>
+        {% if trades %}<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Side</th><th>Asset</th><th>Quantity</th><th>Execution</th><th>Raw Bid / Ask</th><th>Cash After</th></tr></thead><tbody>{% for trade in trades %}<tr><td>{{ trade.timestamp[:19].replace("T", " ") }}</td><td><strong class="{{ trade.side|lower }}">{{ trade.side }}</strong></td><td>{{ trade.symbol }}</td><td>{{ "%.10f"|format(trade.quantity) }}</td><td>${{ "%.6f"|format(trade.execution_price) }}</td><td>${{ "%.6f"|format(trade.raw_bid) }} / ${{ "%.6f"|format(trade.raw_ask) }}</td><td>${{ "%.2f"|format(trade.resulting_cash) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No trades yet.</div>{% endif %}
     </section>
 </main>
-<footer>PAPER TRADING • Local application • Static market feed • Starting balance ${{ "%.2f"|format(portfolio.starting_balance) }}</footer>
+<footer>PAPER TRADING • {{ provider_status.name }} • Observations sampled at most once per second • Starting balance ${{ "%.2f"|format(portfolio.starting_balance) }}</footer>
+<script src="{{ url_for('static', path='/app.js') }}" defer></script>
 </body>
 </html>
