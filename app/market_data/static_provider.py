@@ -85,3 +85,16 @@ class StaticMarketDataProvider:
             )
 
         return quotes
+
+    def get_quote(self, symbol: str) -> MarketQuote:
+        symbol = symbol.upper()
+        if symbol not in self._prices:
+            raise KeyError(f"Unsupported symbol: {symbol}")
+        midpoint = self._move_price(symbol)
+        spread_fraction = self._spread_pct[symbol] / 100
+        half_spread = midpoint * spread_fraction / 2
+        return MarketQuote(
+            symbol=symbol,
+            bid=midpoint - half_spread,
+            ask=midpoint + half_spread,
+        )
