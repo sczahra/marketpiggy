@@ -136,6 +136,15 @@ main {
 .flash { margin-bottom: 16px; padding: 12px 16px; border-radius: 8px; }
 .flash.success { background: #e8f7ed; border: 1px solid #74b887; }
 .flash.error { background: #fff0f0; border: 1px solid #d88; }
+.provider-status { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; padding: 12px 16px; border: 1px solid #d4d8df; border-radius: 8px; background: white; }
+.provider-status.connected { border-color: #74b887; }
+.provider-status.disconnected { border-color: #d88; background: #fff7f7; }
+.provider-status small { width: 100%; color: #a62b2b; }
+.source-badge { margin-right: 8px; padding: 3px 7px; border-radius: 4px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+.source-badge.live { color: #075c32; background: #dff5e8; }
+.source-badge.static { color: #594400; background: #fff1bd; }
+.fresh { color: #167142; font-weight: 700; }
+.stale { color: #a62b2b; font-weight: 800; }
 .reset-panel summary { cursor: pointer; font-weight: 700; }
 .reset-panel > p { margin: 14px 0; color: #5f6570; }
 .reset-form { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; }

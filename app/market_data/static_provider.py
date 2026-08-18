@@ -1,100 +1,79 @@
-from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 from random import uniform
 
-
-@dataclass
-class MarketQuote:
-    symbol: str
-    bid: float
-    ask: float
-
-    @property
-    def midpoint(self) -> float:
-        return (self.bid + self.ask) / 2
-
-    @property
-    def spread(self) -> float:
-        return self.ask - self.bid
-
-    @property
-    def spread_pct(self) -> float:
-        if self.midpoint == 0:
-            return 0.0
-        return (self.spread / self.midpoint) * 100
+from app.market_data.base import (
+    MarketDataError,
+    MarketDataProvider,
+    MarketQuote,
+    ProviderStatus,
+)
+from app.market_data.scanner import MarketScanner
 
 
-class StaticMarketDataProvider:
-    """
-    Fake market-data source for Milestone 1.
+class StaticMarketDataProvider(MarketDataProvider):
+    """Fake offline market data, always labeled as static."""
 
-    Prices drift slightly whenever quotes are requested.
-    No network connection is used.
-    """
+    name = "Static simulation"
+    live = False
+    stale_after_seconds = float("inf")
 
-    def __init__(self):
+    def __init__(self, scanner: MarketScanner | None = None):
+        self.scanner = scanner or MarketScanner()
         self._prices = {
-            "BTC": 115000.00,
-            "ETH": 4300.00,
-            "DOGE": 0.2250,
-            "SOL": 185.00,
-            "XRP": 2.95,
-            "LTC": 122.00,
-            "ADA": 0.88,
-            "LINK": 24.50,
-            "AVAX": 26.00,
+            "BTC": Decimal("115000.00"),
+            "ETH": Decimal("4300.00"),
+            "DOGE": Decimal("0.2250"),
+            "SOL": Decimal("185.00"),
+            "XRP": Decimal("2.95"),
+            "LTC": Decimal("122.00"),
+            "ADA": Decimal("0.88"),
+            "LINK": Decimal("24.50"),
+            "AVAX": Decimal("26.00"),
         }
-
         self._spread_pct = {
-            "BTC": 0.025,
-            "ETH": 0.030,
-            "DOGE": 0.080,
-            "SOL": 0.050,
-            "XRP": 0.060,
-            "LTC": 0.070,
-            "ADA": 0.080,
-            "LINK": 0.070,
-            "AVAX": 0.080,
+            "BTC": Decimal("0.025"), "ETH": Decimal("0.030"),
+            "DOGE": Decimal("0.080"), "SOL": Decimal("0.050"),
+            "XRP": Decimal("0.060"), "LTC": Decimal("0.070"),
+            "ADA": Decimal("0.080"), "LINK": Decimal("0.070"),
+            "AVAX": Decimal("0.080"),
         }
+        self._last_update: datetime | None = None
 
-    def _move_price(self, symbol: str) -> float:
-        current = self._prices[symbol]
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        return tuple(self._prices)
 
-        # Small random move of roughly +/- 0.10%.
-        change_pct = uniform(-0.001, 0.001)
-
-        updated = current * (1 + change_pct)
-        self._prices[symbol] = updated
-
-        return updated
-
-    def get_quotes(self) -> list[MarketQuote]:
-        quotes = []
-
-        for symbol in self._prices:
-            midpoint = self._move_price(symbol)
-
-            spread_fraction = self._spread_pct[symbol] / 100
-            half_spread = midpoint * spread_fraction / 2
-
-            quotes.append(
-                MarketQuote(
-                    symbol=symbol,
-                    bid=midpoint - half_spread,
-                    ask=midpoint + half_spread,
-                )
-            )
-
-        return quotes
-
-    def get_quote(self, symbol: str) -> MarketQuote:
-        symbol = symbol.upper()
+    def _quote(self, symbol: str) -> MarketQuote:
         if symbol not in self._prices:
-            raise KeyError(f"Unsupported symbol: {symbol}")
-        midpoint = self._move_price(symbol)
-        spread_fraction = self._spread_pct[symbol] / 100
-        half_spread = midpoint * spread_fraction / 2
-        return MarketQuote(
+            raise MarketDataError(f"Unsupported static symbol: {symbol}")
+        move = Decimal(str(uniform(-0.001, 0.001)))
+        midpoint = self._prices[symbol] * (Decimal("1") + move)
+        self._prices[symbol] = midpoint
+        half_spread = midpoint * (self._spread_pct[symbol] / Decimal("100")) / 2
+        now = datetime.now(timezone.utc)
+        quote = MarketQuote(
             symbol=symbol,
             bid=midpoint - half_spread,
             ask=midpoint + half_spread,
+            timestamp=now,
+            received_at=now,
+            provider=self.name,
+        )
+        self._last_update = now
+        self.scanner.record(quote)
+        return quote
+
+    def get_quotes(self) -> list[MarketQuote]:
+        return [self._quote(symbol) for symbol in self._prices]
+
+    def get_quote(self, symbol: str) -> MarketQuote:
+        return self._quote(symbol.strip().upper())
+
+    def status(self) -> ProviderStatus:
+        return ProviderStatus(
+            name=self.name,
+            live=False,
+            connected=True,
+            last_update=self._last_update,
         )
