@@ -1,0 +1,185 @@
+:root {
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+    color: #202124;
+    background: #f4f5f7;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+}
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 20px 28px;
+
+    background: white;
+    border-bottom: 1px solid #dfe1e5;
+}
+
+h1,
+h2,
+p {
+    margin-top: 0;
+}
+
+h1 {
+    margin-bottom: 3px;
+    font-size: 24px;
+}
+
+.subtitle {
+    margin-bottom: 0;
+    color: #6b7280;
+}
+
+.paper-badge {
+    padding: 8px 12px;
+
+    border: 2px solid #8a4b00;
+    border-radius: 6px;
+
+    background: #fff4d6;
+
+    color: #653700;
+
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+main {
+    width: min(1150px, calc(100% - 32px));
+    margin: 24px auto 50px;
+}
+
+.warning {
+    margin-bottom: 20px;
+    padding: 13px 16px;
+
+    border: 1px solid #e1b955;
+    border-radius: 8px;
+
+    background: #fff8df;
+}
+
+.account-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(160px, 1fr));
+
+    gap: 14px;
+
+    margin-bottom: 20px;
+}
+
+.card,
+.panel {
+    background: white;
+
+    border: 1px solid #dfe1e5;
+    border-radius: 9px;
+}
+
+.card {
+    padding: 18px;
+}
+
+.card .label {
+    display: block;
+
+    margin-bottom: 8px;
+
+    color: #6b7280;
+
+    font-size: 13px;
+}
+
+.card strong {
+    font-size: 22px;
+}
+
+.panel {
+    margin-bottom: 18px;
+    padding: 20px;
+}
+
+.panel-heading h2 {
+    margin-bottom: 4px;
+}
+
+.panel-heading p {
+    color: #6b7280;
+}
+
+.empty-state {
+    padding: 28px;
+
+    border: 1px dashed #c7cbd1;
+    border-radius: 7px;
+
+    text-align: center;
+
+    color: #737982;
+}
+
+footer {
+    padding: 20px;
+
+    border-top: 1px solid #dfe1e5;
+
+    text-align: center;
+
+    color: #7a7f87;
+
+    font-size: 13px;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th,
+td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: right;
+    white-space: nowrap;
+}
+
+th:first-child,
+td:first-child {
+    text-align: left;
+}
+
+th {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Crypto Paper Trader</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', path='/app.css') }}"
+    >
+</head>
+
+<body>
+
+<header class="topbar">
+    <div>
+        <h1>Crypto Paper Trader</h1>
+        <p class="subtitle">Local strategy simulator</p>
+    </div>
+
+    <div class="paper-badge">
+        PAPER TRADING
+    </div>
+</header>
+
+<main>
+
+    <section class="warning">
+        Simulation only. No real brokerage connection or real-money execution is enabled.
+    </section>
+
+    <section class="account-grid">
+
+        <article class="card">
+            <span class="label">Portfolio Value</span>
+            <strong>${{ "%.2f"|format(portfolio_value) }}</strong>
+        </article>
+
+        <article class="card">
+            <span class="label">Cash</span>
+            <strong>${{ "%.2f"|format(cash) }}</strong>
+        </article>
+
+        <article class="card">
+            <span class="label">Current Holding</span>
+            <strong>None</strong>
+        </article>
+
+        <article class="card">
+            <span class="label">Realized P/L</span>
+            <strong>${{ "%.2f"|format(realized_pl) }}</strong>
+        </article>
+
+        <article class="card">
+            <span class="label">Unrealized P/L</span>
+            <strong>${{ "%.2f"|format(unrealized_pl) }}</strong>
+        </article>
+
+        <article class="card">
+            <span class="label">Total Return</span>
+            <strong>0.00%</strong>
+        </article>
+
+    </section>
+
+
+    <section class="panel">
+
+        <div class="panel-heading">
+            <div>
+                <h2>Market</h2>
+                <p>Static simulated quotes for Milestone 1.</p>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Bid</th>
+                        <th>Ask</th>
+                        <th>Midpoint</th>
+                        <th>Spread</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for quote in quotes %}
+                    <tr>
+                        <td><strong>{{ quote.symbol }}</strong></td>
+
+                        <td>
+                            {% if quote.bid >= 1000 %}
+                                ${{ "%.2f"|format(quote.bid) }}
+                            {% elif quote.bid >= 1 %}
+                                ${{ "%.4f"|format(quote.bid) }}
+                            {% else %}
+                                ${{ "%.6f"|format(quote.bid) }}
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if quote.ask >= 1000 %}
+                                ${{ "%.2f"|format(quote.ask) }}
+                            {% elif quote.ask >= 1 %}
+                                ${{ "%.4f"|format(quote.ask) }}
+                            {% else %}
+                                ${{ "%.6f"|format(quote.ask) }}
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if quote.midpoint >= 1000 %}
+                                ${{ "%.2f"|format(quote.midpoint) }}
+                            {% elif quote.midpoint >= 1 %}
+                                ${{ "%.4f"|format(quote.midpoint) }}
+                            {% else %}
+                                ${{ "%.6f"|format(quote.midpoint) }}
+                            {% endif %}
+                        </td>
+
+                        <td>{{ "%.3f"|format(quote.spread_pct) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </section>
+
+
+    <section class="panel">
+
+        <div class="panel-heading">
+            <div>
+                <h2>Trade Log</h2>
+                <p>Simulated executions will appear here.</p>
+            </div>
+        </div>
+
+        <div class="empty-state">
+            No trades yet.
+        </div>
+
+    </section>
+
+</main>
+
+<footer>
+    Local application • Paper mode only • Static market feed
+</footer>
+
+</body>
+</html>
