@@ -76,6 +76,33 @@ def test_portfolio_and_trades_survive_reload(tmp_path):
     assert len(reloaded.trades()) == 1
 
 
+def test_new_simulation_persists_non_default_balance_and_preserves_history(tmp_path):
+    path = tmp_path / "reset.db"
+    original = PaperBroker(path)
+    original.buy("BTC", "5", bid="99", ask="100")
+
+    reset = original.start_new_simulation("250.75", preserve_history=True)
+    assert reset.starting_balance == Decimal("250.75")
+    assert reset.cash == Decimal("250.75")
+    assert reset.symbol is None
+    assert reset.quantity == 0
+    assert reset.realized_pl == 0
+    assert len(original.trades()) == 1
+    assert original.reset_count() == 1
+
+    reloaded = PaperBroker(path)
+    assert reloaded.portfolio().starting_balance == Decimal("250.75")
+    assert reloaded.portfolio().cash == Decimal("250.75")
+    assert len(reloaded.trades()) == 1
+    assert reloaded.reset_count() == 1
+
+
+@pytest.mark.parametrize("balance", ["0", "-10", "nan", "1000000000.01"])
+def test_invalid_new_simulation_balances_are_rejected(broker, balance):
+    with pytest.raises(OrderRejected):
+        broker.start_new_simulation(balance, preserve_history=True)
+
+
 @pytest.mark.parametrize("amount", ["0", "-1", "nan", "Infinity"])
 def test_invalid_buy_amounts_are_rejected(broker, amount):
     with pytest.raises(OrderRejected):

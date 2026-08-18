@@ -49,9 +49,25 @@ async def dashboard(request: Request):
             "quotes": quotes,
             "trades": broker.trades(),
             "friction_rate": broker.friction_rate,
+            "reset_count": broker.reset_count(),
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
+    )
+
+
+@app.post("/simulation/reset")
+async def reset_simulation(
+    starting_balance: str = Form(...), confirm_reset: str | None = Form(None)
+):
+    if confirm_reset != "yes":
+        return _redirect("Confirm the portfolio reset before continuing", error=True)
+    try:
+        broker.start_new_simulation(starting_balance, preserve_history=True)
+    except OrderRejected as exc:
+        return _redirect(str(exc), error=True)
+    return _redirect(
+        f"Started a new paper simulation with ${starting_balance}; trade history was preserved"
     )
 
 

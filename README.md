@@ -25,6 +25,8 @@ $env:MARKETPIGGY_DB = "data/marketpiggy.db"
 
 `MARKETPIGGY_FRICTION_RATE` is a decimal rate: `0.001` means 0.1%. The local database is created under `data/` by default and is ignored by Git.
 
+The dashboard's **Start or reset simulation** control accepts any positive balance up to $1 billion. Resetting requires an explicit confirmation because it clears current cash, holdings, cost basis, and P/L. Executed trade history is retained, and each reset is recorded in SQLite. `MARKETPIGGY_STARTING_BALANCE` remains only the default used when a database is first created.
+
 ## Tests
 
 ```powershell

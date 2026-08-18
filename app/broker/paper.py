@@ -13,6 +13,7 @@ from app.broker.base import Broker
 ZERO = Decimal("0")
 QUANTITY_PLACES = Decimal("0.000000000000000001")
 PRICE_PLACES = Decimal("0.000000000001")
+MAX_STARTING_BALANCE = Decimal("1000000000")
 
 
 class OrderRejected(ValueError):
@@ -112,6 +113,16 @@ class PaperBroker(Broker):
                     resulting_cash TEXT NOT NULL,
                     resulting_portfolio_value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS simulation_resets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    previous_starting_balance TEXT NOT NULL,
+                    new_starting_balance TEXT NOT NULL,
+                    previous_cash TEXT NOT NULL,
+                    previous_symbol TEXT,
+                    previous_quantity TEXT NOT NULL,
+                    previous_realized_pl TEXT NOT NULL
+                );
                 """
             )
             connection.execute(
@@ -123,6 +134,55 @@ class PaperBroker(Broker):
                 """,
                 (str(self.starting_balance), str(self.starting_balance)),
             )
+
+    def start_new_simulation(
+        self, starting_balance: Decimal | str, *, preserve_history: bool
+    ) -> Portfolio:
+        """Reset account state after explicit confirmation, retaining prior trades."""
+        balance = _decimal(starting_balance, "starting balance")
+        if balance <= ZERO:
+            raise OrderRejected("starting balance must be positive")
+        if balance > MAX_STARTING_BALANCE:
+            raise OrderRejected("starting balance must not exceed $1,000,000,000")
+        if not preserve_history:
+            raise OrderRejected("trade history must be preserved when resetting")
+
+        with self._lock, self._connect() as connection:
+            account = self._read_account(connection)
+            connection.execute(
+                """
+                INSERT INTO simulation_resets (
+                    timestamp, previous_starting_balance, new_starting_balance,
+                    previous_cash, previous_symbol, previous_quantity,
+                    previous_realized_pl
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    str(account["starting_balance"]),
+                    str(balance),
+                    str(account["cash"]),
+                    account["symbol"],
+                    str(account["quantity"]),
+                    str(account["realized_pl"]),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE account SET starting_balance = ?, cash = ?, symbol = NULL,
+                    quantity = '0', average_entry_price = '0', realized_pl = '0'
+                WHERE id = 1
+                """,
+                (str(balance), str(balance)),
+            )
+            return self._portfolio_from_account(self._read_account(connection), None)
+
+    def reset_count(self) -> int:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM simulation_resets"
+            ).fetchone()
+            return int(row["count"])
 
     @staticmethod
     def _read_account(connection: sqlite3.Connection) -> dict[str, Decimal | str | None]:

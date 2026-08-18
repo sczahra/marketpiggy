@@ -25,6 +25,19 @@
         <article class="card"><span class="label">Total Return</span><strong>{{ "%+.2f"|format(portfolio.total_return_pct) }}%</strong></article>
     </section>
 
+    <details class="panel reset-panel">
+        <summary>Start or reset simulation</summary>
+        <p>Choose a new paper balance. This resets current cash, holdings, cost basis, and P/L. <strong>Existing trade history is preserved.</strong></p>
+        <form method="post" action="/simulation/reset" class="reset-form">
+            <label>New starting balance
+                <span class="money-input"><span>$</span><input name="starting_balance" type="number" min="0.01" max="1000000000" step="0.01" value="10.00" required></span>
+            </label>
+            <label class="confirmation"><input name="confirm_reset" type="checkbox" value="yes" required> I understand the current portfolio state and P/L will be reset.</label>
+            <button class="reset-button" type="submit">Start New Simulation</button>
+        </form>
+        {% if reset_count %}<small>This account has been reset {{ reset_count }} time{% if reset_count != 1 %}s{% endif %}.</small>{% endif %}
+    </details>
+
     {% if portfolio.symbol %}
     <section class="panel close-panel">
         <div><h2>Open {{ portfolio.symbol }} Position</h2><p>Marked at the current bid. Sells fill at bid minus {{ "%.3f"|format(friction_rate * 100) }}% friction.</p></div>
@@ -48,7 +61,7 @@
     </section>
 
     <section class="panel">
-        <div class="panel-heading"><div><h2>Trade Log</h2><p>Persisted simulated executions, newest first.</p></div></div>
+        <div class="panel-heading"><div><h2>Trade Log</h2><p>Persisted simulated executions from all simulations, newest first.</p></div></div>
         {% if trades %}<div class="table-wrap"><table>
             <thead><tr><th>Time (UTC)</th><th>Side</th><th>Asset</th><th>Quantity</th><th>Execution</th><th>Raw Bid / Ask</th><th>Cash After</th></tr></thead>
             <tbody>{% for trade in trades %}<tr><td>{{ trade.timestamp[:19].replace("T", " ") }}</td><td><strong class="{{ trade.side|lower }}">{{ trade.side }}</strong></td><td>{{ trade.symbol }}</td><td>{{ "%.10f"|format(trade.quantity) }}</td><td>${{ "%.6f"|format(trade.execution_price) }}</td><td>${{ "%.6f"|format(trade.raw_bid) }} / ${{ "%.6f"|format(trade.raw_ask) }}</td><td>${{ "%.2f"|format(trade.resulting_cash) }}</td></tr>{% endfor %}</tbody>
