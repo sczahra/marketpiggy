@@ -14,7 +14,7 @@
 <main>
     <section class="warning">Simulation only. Live data never places exchange or brokerage orders.</section>
     <section id="provider-status" class="provider-status {{ 'connected' if provider_status.connected else 'disconnected' }}">
-        <div><span class="source-badge {{ 'live' if provider_status.live else 'static' }}">{{ 'LIVE' if provider_status.live else 'STATIC' }}</span> <strong id="provider-name">{{ provider_status.name }}</strong></div>
+        <div><span class="source-badge {{ 'live' if provider_status.live else 'static' }}">{{ 'LIVE' if provider_status.live else 'STATIC' }}</span> <strong id="provider-name">{{ provider_status.name }}</strong> <span class="session-label">• {{ active_session.label }}</span></div>
         <div id="connection-state">{{ 'Connected' if provider_status.connected else 'Disconnected / connecting' }}{% if provider_status.last_update %} • Last update {{ provider_status.last_update.strftime('%H:%M:%S') }} UTC{% endif %}</div>
         {% if provider_status.error %}<small id="provider-error">{{ provider_status.error }}</small>{% else %}<small id="provider-error"></small>{% endif %}
     </section>
@@ -74,7 +74,7 @@
 
     <section class="panel">
         <div class="panel-heading"><div><h2>Trade Log</h2><p>Persisted paper executions from all simulations, newest first.</p></div></div>
-        {% if trades %}<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Side</th><th>Asset</th><th>Quantity</th><th>Execution</th><th>Raw Bid / Ask</th><th>Cash After</th></tr></thead><tbody>{% for trade in trades %}<tr><td>{{ trade.timestamp[:19].replace("T", " ") }}</td><td><strong class="{{ trade.side|lower }}">{{ trade.side }}</strong></td><td>{{ trade.symbol }}</td><td>{{ "%.10f"|format(trade.quantity) }}</td><td>${{ "%.6f"|format(trade.execution_price) }}</td><td>${{ "%.6f"|format(trade.raw_bid) }} / ${{ "%.6f"|format(trade.raw_ask) }}</td><td>${{ "%.2f"|format(trade.resulting_cash) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No trades yet.</div>{% endif %}
+        {% if trades %}<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Context</th><th>Side</th><th>Asset</th><th>Quantity</th><th>Execution</th><th>Raw Bid / Ask</th><th>Cash After</th></tr></thead><tbody>{% for trade in trades %}<tr><td>{{ trade.timestamp[:19].replace("T", " ") }}</td><td><span class="provenance-label">{{ trade.context_label }}</span></td><td><strong class="{{ trade.side|lower }}">{{ trade.side }}</strong></td><td>{{ trade.symbol }}</td><td>{{ "%.10f"|format(trade.quantity) }}</td><td>${{ "%.6f"|format(trade.execution_price) }}</td><td>${{ "%.6f"|format(trade.raw_bid) }} / ${{ "%.6f"|format(trade.raw_ask) }}</td><td>${{ "%.2f"|format(trade.resulting_cash) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No trades yet.</div>{% endif %}
     </section>
 </main>
 <footer>PAPER TRADING • {{ provider_status.name }} • Observations sampled at most once per second • Starting balance ${{ "%.2f"|format(portfolio.starting_balance) }}</footer>

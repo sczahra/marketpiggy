@@ -123,6 +123,7 @@ async def dashboard(request: Request):
         name="dashboard.html",
         context={
             "portfolio": portfolio,
+            "active_session": broker.active_session(),
             "held_quote": mark_quote,
             "rows": rows,
             "trades": broker.trades(),
@@ -157,7 +158,15 @@ async def reset_simulation(
 async def buy(symbol: str = Form(...), dollars: str = Form(...)):
     try:
         quote = market_data.get_trade_quote(symbol)
-        broker.buy(symbol, dollars, bid=quote.bid, ask=quote.ask)
+        broker.buy(
+            symbol,
+            dollars,
+            bid=quote.bid,
+            ask=quote.ask,
+            provider_name=quote.provider,
+            quote_timestamp=quote.timestamp,
+            received_at=quote.received_at,
+        )
     except (OrderRejected, MarketDataError) as exc:
         return _redirect(str(exc), error=True)
     return _redirect(f"Bought {symbol.upper()} with ${dollars} in paper funds")
@@ -167,7 +176,15 @@ async def buy(symbol: str = Form(...), dollars: str = Form(...)):
 async def sell(symbol: str = Form(...), quantity: str = Form(...)):
     try:
         quote = market_data.get_trade_quote(symbol)
-        broker.sell(symbol, quantity, bid=quote.bid, ask=quote.ask)
+        broker.sell(
+            symbol,
+            quantity,
+            bid=quote.bid,
+            ask=quote.ask,
+            provider_name=quote.provider,
+            quote_timestamp=quote.timestamp,
+            received_at=quote.received_at,
+        )
     except (OrderRejected, MarketDataError) as exc:
         return _redirect(str(exc), error=True)
     return _redirect(f"Sold {quantity} {symbol.upper()} in paper mode")

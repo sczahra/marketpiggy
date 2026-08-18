@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 from threading import RLock
+from uuid import uuid4
 
 from app.broker.base import Broker
 
@@ -14,6 +15,7 @@ ZERO = Decimal("0")
 QUANTITY_PLACES = Decimal("0.000000000000000001")
 PRICE_PLACES = Decimal("0.000000000001")
 MAX_STARTING_BALANCE = Decimal("1000000000")
+ALL_SESSIONS = object()
 
 
 class OrderRejected(ValueError):
@@ -47,6 +49,49 @@ class Trade:
     friction_amount: Decimal
     resulting_cash: Decimal
     resulting_portfolio_value: Decimal
+    session_id: str | None = None
+    provider_name: str | None = None
+    quote_timestamp: str | None = None
+    received_at: str | None = None
+    session_number: int | None = None
+    session_legacy: bool = False
+
+    @property
+    def session_label(self) -> str:
+        if self.session_id is None:
+            return "Legacy"
+        if self.session_legacy:
+            return "Legacy session"
+        return f"Simulation {self.session_number}"
+
+    @property
+    def provider_label(self) -> str:
+        if self.session_id is None:
+            return "Legacy"
+        if self.provider_name == "Coinbase Advanced Trade":
+            return "Live"
+        if self.provider_name and self.provider_name.lower().startswith("static"):
+            return "Static"
+        return self.provider_name or "Unknown"
+
+    @property
+    def context_label(self) -> str:
+        if self.session_id is None:
+            return "Legacy"
+        return f"{self.session_label} • {self.provider_label}"
+
+
+@dataclass(frozen=True)
+class SimulationSession:
+    id: str
+    number: int
+    started_at: str
+    starting_balance: Decimal
+    legacy: bool = False
+
+    @property
+    def label(self) -> str:
+        return "Legacy session" if self.legacy else f"Simulation {self.number}"
 
 
 def _decimal(value: Decimal | str | int | float, field: str) -> Decimal:
@@ -57,6 +102,12 @@ def _decimal(value: Decimal | str | int | float, field: str) -> Decimal:
     if not result.is_finite():
         raise OrderRejected(f"{field} must be finite")
     return result
+
+
+def _iso_timestamp(value: datetime | str | None) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 class PaperBroker(Broker):
@@ -123,17 +174,94 @@ class PaperBroker(Broker):
                     previous_quantity TEXT NOT NULL,
                     previous_realized_pl TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS simulation_sessions (
+                    id TEXT PRIMARY KEY,
+                    sequence_number INTEGER NOT NULL UNIQUE,
+                    started_at TEXT NOT NULL,
+                    starting_balance TEXT NOT NULL,
+                    legacy INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO account
-                    (id, starting_balance, cash, symbol, quantity,
-                     average_entry_price, realized_pl)
-                VALUES (1, ?, ?, NULL, '0', '0', '0')
-                """,
-                (str(self.starting_balance), str(self.starting_balance)),
-            )
+            self._add_column(connection, "account", "current_session_id", "TEXT")
+            self._add_column(connection, "trades", "session_id", "TEXT")
+            self._add_column(connection, "trades", "provider_name", "TEXT")
+            self._add_column(connection, "trades", "quote_timestamp", "TEXT")
+            self._add_column(connection, "trades", "received_at", "TEXT")
+            self._add_column(connection, "simulation_resets", "old_session_id", "TEXT")
+            self._add_column(connection, "simulation_resets", "new_session_id", "TEXT")
+
+            account = connection.execute("SELECT * FROM account WHERE id = 1").fetchone()
+            if account is None:
+                session = self._create_session(connection, self.starting_balance)
+                connection.execute(
+                    """
+                    INSERT INTO account (
+                        id, starting_balance, cash, symbol, quantity,
+                        average_entry_price, realized_pl, current_session_id
+                    ) VALUES (1, ?, ?, NULL, '0', '0', '0', ?)
+                    """,
+                    (str(self.starting_balance), str(self.starting_balance), session.id),
+                )
+            elif account["current_session_id"] is None:
+                reset_count = connection.execute(
+                    "SELECT COUNT(*) FROM simulation_resets"
+                ).fetchone()[0]
+                session = self._create_session(
+                    connection,
+                    Decimal(account["starting_balance"]),
+                    legacy=True,
+                    sequence_number=reset_count + 1,
+                )
+                connection.execute(
+                    "UPDATE account SET current_session_id = ? WHERE id = 1",
+                    (session.id,),
+                )
+
+    @staticmethod
+    def _add_column(
+        connection: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        columns = {
+            row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _create_session(
+        connection: sqlite3.Connection,
+        starting_balance: Decimal,
+        *,
+        legacy: bool = False,
+        sequence_number: int | None = None,
+    ) -> SimulationSession:
+        if sequence_number is None:
+            sequence_number = connection.execute(
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM simulation_sessions"
+            ).fetchone()[0]
+        session = SimulationSession(
+            id=str(uuid4()),
+            number=sequence_number,
+            started_at=datetime.now(timezone.utc).isoformat(),
+            starting_balance=starting_balance,
+            legacy=legacy,
+        )
+        connection.execute(
+            """
+            INSERT INTO simulation_sessions (
+                id, sequence_number, started_at, starting_balance, legacy
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                session.id,
+                session.number,
+                session.started_at,
+                str(session.starting_balance),
+                int(session.legacy),
+            ),
+        )
+        return session
 
     def start_new_simulation(
         self, starting_balance: Decimal | str, *, preserve_history: bool
@@ -149,13 +277,14 @@ class PaperBroker(Broker):
 
         with self._lock, self._connect() as connection:
             account = self._read_account(connection)
+            new_session = self._create_session(connection, balance)
             connection.execute(
                 """
                 INSERT INTO simulation_resets (
                     timestamp, previous_starting_balance, new_starting_balance,
                     previous_cash, previous_symbol, previous_quantity,
-                    previous_realized_pl
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    previous_realized_pl, old_session_id, new_session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
@@ -165,15 +294,18 @@ class PaperBroker(Broker):
                     account["symbol"],
                     str(account["quantity"]),
                     str(account["realized_pl"]),
+                    account["current_session_id"],
+                    new_session.id,
                 ),
             )
             connection.execute(
                 """
                 UPDATE account SET starting_balance = ?, cash = ?, symbol = NULL,
-                    quantity = '0', average_entry_price = '0', realized_pl = '0'
+                    quantity = '0', average_entry_price = '0', realized_pl = '0',
+                    current_session_id = ?
                 WHERE id = 1
                 """,
-                (str(balance), str(balance)),
+                (str(balance), str(balance), new_session.id),
             )
             return self._portfolio_from_account(self._read_account(connection), None)
 
@@ -194,7 +326,23 @@ class PaperBroker(Broker):
             "quantity": Decimal(row["quantity"]),
             "average_entry_price": Decimal(row["average_entry_price"]),
             "realized_pl": Decimal(row["realized_pl"]),
+            "current_session_id": row["current_session_id"],
         }
+
+    def active_session(self) -> SimulationSession:
+        with self._lock, self._connect() as connection:
+            account = self._read_account(connection)
+            row = connection.execute(
+                "SELECT * FROM simulation_sessions WHERE id = ?",
+                (account["current_session_id"],),
+            ).fetchone()
+            return SimulationSession(
+                id=row["id"],
+                number=row["sequence_number"],
+                started_at=row["started_at"],
+                starting_balance=Decimal(row["starting_balance"]),
+                legacy=bool(row["legacy"]),
+            )
 
     @staticmethod
     def _portfolio_from_account(
@@ -246,6 +394,9 @@ class PaperBroker(Broker):
         *,
         bid: Decimal | str,
         ask: Decimal | str,
+        provider_name: str | None = None,
+        quote_timestamp: datetime | str | None = None,
+        received_at: datetime | str | None = None,
     ) -> Trade:
         symbol = symbol.strip().upper()
         dollars = _decimal(dollars, "dollar amount")
@@ -306,6 +457,10 @@ class PaperBroker(Broker):
                 friction_amount=friction_amount,
                 resulting_cash=new_cash,
                 resulting_portfolio_value=portfolio_value,
+                session_id=str(account["current_session_id"]),
+                provider_name=provider_name or "Unknown",
+                quote_timestamp=_iso_timestamp(quote_timestamp),
+                received_at=_iso_timestamp(received_at),
             )
             self._insert_trade(connection, trade)
             return trade
@@ -317,6 +472,9 @@ class PaperBroker(Broker):
         *,
         bid: Decimal | str,
         ask: Decimal | str,
+        provider_name: str | None = None,
+        quote_timestamp: datetime | str | None = None,
+        received_at: datetime | str | None = None,
     ) -> Trade:
         symbol = symbol.strip().upper()
         quantity = _decimal(quantity, "quantity")
@@ -375,6 +533,10 @@ class PaperBroker(Broker):
                 friction_amount=friction_amount,
                 resulting_cash=new_cash,
                 resulting_portfolio_value=portfolio_value,
+                session_id=str(account["current_session_id"]),
+                provider_name=provider_name or "Unknown",
+                quote_timestamp=_iso_timestamp(quote_timestamp),
+                received_at=_iso_timestamp(received_at),
             )
             self._insert_trade(connection, trade)
             return trade
@@ -393,32 +555,80 @@ class PaperBroker(Broker):
             INSERT INTO trades (
                 timestamp, symbol, side, raw_bid, raw_ask, execution_price,
                 quantity, friction_rate, friction_amount, resulting_cash,
-                resulting_portfolio_value
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                resulting_portfolio_value, session_id, provider_name,
+                quote_timestamp, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            tuple(str(value) for value in trade.__dict__.values()),
+            (
+                trade.timestamp,
+                trade.symbol,
+                trade.side,
+                str(trade.raw_bid),
+                str(trade.raw_ask),
+                str(trade.execution_price),
+                str(trade.quantity),
+                str(trade.friction_rate),
+                str(trade.friction_amount),
+                str(trade.resulting_cash),
+                str(trade.resulting_portfolio_value),
+                trade.session_id,
+                trade.provider_name,
+                trade.quote_timestamp,
+                trade.received_at,
+            ),
         )
 
-    def trades(self, limit: int = 100) -> list[Trade]:
+    def trades(
+        self, limit: int = 100, session_id: str | None | object = ALL_SESSIONS
+    ) -> list[Trade]:
         if limit <= 0:
             return []
+        where = ""
+        parameters: list[object] = []
+        if session_id is None:
+            where = "WHERE t.session_id IS NULL"
+        elif session_id is not ALL_SESSIONS:
+            where = "WHERE t.session_id = ?"
+            parameters.append(session_id)
+        parameters.append(limit)
         with self._lock, self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)
+                f"""
+                SELECT t.*, s.sequence_number AS session_number,
+                       s.legacy AS session_legacy
+                FROM trades AS t
+                LEFT JOIN simulation_sessions AS s ON s.id = t.session_id
+                {where}
+                ORDER BY t.id DESC LIMIT ?
+                """,
+                parameters,
             ).fetchall()
-        return [
-            Trade(
-                timestamp=row["timestamp"],
-                symbol=row["symbol"],
-                side=row["side"],
-                raw_bid=Decimal(row["raw_bid"]),
-                raw_ask=Decimal(row["raw_ask"]),
-                execution_price=Decimal(row["execution_price"]),
-                quantity=Decimal(row["quantity"]),
-                friction_rate=Decimal(row["friction_rate"]),
-                friction_amount=Decimal(row["friction_amount"]),
-                resulting_cash=Decimal(row["resulting_cash"]),
-                resulting_portfolio_value=Decimal(row["resulting_portfolio_value"]),
-            )
-            for row in rows
-        ]
+        return [self._row_to_trade(row) for row in rows]
+
+    def trades_for_session(
+        self, session_id: str | None, limit: int = 100
+    ) -> list[Trade]:
+        """Return only one session; None scopes explicitly to legacy rows."""
+        return self.trades(limit=limit, session_id=session_id)
+
+    @staticmethod
+    def _row_to_trade(row: sqlite3.Row) -> Trade:
+        return Trade(
+            timestamp=row["timestamp"],
+            symbol=row["symbol"],
+            side=row["side"],
+            raw_bid=Decimal(row["raw_bid"]),
+            raw_ask=Decimal(row["raw_ask"]),
+            execution_price=Decimal(row["execution_price"]),
+            quantity=Decimal(row["quantity"]),
+            friction_rate=Decimal(row["friction_rate"]),
+            friction_amount=Decimal(row["friction_amount"]),
+            resulting_cash=Decimal(row["resulting_cash"]),
+            resulting_portfolio_value=Decimal(row["resulting_portfolio_value"]),
+            session_id=row["session_id"],
+            provider_name=row["provider_name"],
+            quote_timestamp=row["quote_timestamp"],
+            received_at=row["received_at"],
+            session_number=row["session_number"],
+            session_legacy=bool(row["session_legacy"]),
+        )

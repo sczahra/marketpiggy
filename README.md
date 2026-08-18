@@ -65,6 +65,12 @@ Current bid, ask, spread, return, volatility, quote age, and freshness appear in
 
 Current observations are sampled to the local SQLite database at most once per second per sampling pass. Each pass stores one snapshot for every currently available symbol, rather than every WebSocket tick. The stored fields are sample time, provider timestamp, provider, symbol, bid, ask, midpoint, and spread. This is a replay foundation, not a full tick archive.
 
+## Simulation and trade provenance
+
+Each new or reset paper simulation has a persistent session identity. New trades store that session together with the market-data provider, provider quote timestamp, and local receive timestamp. This prevents future comparisons from accidentally mixing separate simulations or static and live fills.
+
+Trades created before this provenance schema remain unchanged and appear as **Legacy** because their exact provider and session cannot be established safely. MarketPiggy does not guess that old trades came from Coinbase or rewrite their historical execution data. This metadata is groundwork for trustworthy future comparisons; Milestone 2.1 does not add strategy analytics or replay UI.
+
 ## Tests
 
 The automated suite uses fixture messages and temporary databases; it does not contact Coinbase:
