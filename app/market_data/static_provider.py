@@ -18,8 +18,18 @@ class StaticMarketDataProvider(MarketDataProvider):
     live = False
     stale_after_seconds = float("inf")
 
-    def __init__(self, scanner: MarketScanner | None = None):
+    def __init__(
+        self,
+        scanner: MarketScanner | None = None,
+        *,
+        deterministic_move_pct: Decimal | str | None = None,
+    ):
         self.scanner = scanner or MarketScanner()
+        self.deterministic_move_pct = (
+            Decimal(str(deterministic_move_pct))
+            if deterministic_move_pct is not None
+            else None
+        )
         self._prices = {
             "BTC": Decimal("115000.00"),
             "ETH": Decimal("4300.00"),
@@ -47,7 +57,11 @@ class StaticMarketDataProvider(MarketDataProvider):
     def _quote(self, symbol: str) -> MarketQuote:
         if symbol not in self._prices:
             raise MarketDataError(f"Unsupported static symbol: {symbol}")
-        move = Decimal(str(uniform(-0.001, 0.001)))
+        move = (
+            self.deterministic_move_pct / Decimal("100")
+            if self.deterministic_move_pct is not None
+            else Decimal(str(uniform(-0.001, 0.001)))
+        )
         midpoint = self._prices[symbol] * (Decimal("1") + move)
         self._prices[symbol] = midpoint
         half_spread = midpoint * (self._spread_pct[symbol] / Decimal("100")) / 2

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
@@ -55,6 +55,7 @@ class Trade:
     received_at: str | None = None
     session_number: int | None = None
     session_legacy: bool = False
+    id: int | None = None
 
     @property
     def session_label(self) -> str:
@@ -462,8 +463,7 @@ class PaperBroker(Broker):
                 quote_timestamp=_iso_timestamp(quote_timestamp),
                 received_at=_iso_timestamp(received_at),
             )
-            self._insert_trade(connection, trade)
-            return trade
+            return replace(trade, id=self._insert_trade(connection, trade))
 
     def sell(
         self,
@@ -538,8 +538,7 @@ class PaperBroker(Broker):
                 quote_timestamp=_iso_timestamp(quote_timestamp),
                 received_at=_iso_timestamp(received_at),
             )
-            self._insert_trade(connection, trade)
-            return trade
+            return replace(trade, id=self._insert_trade(connection, trade))
 
     @staticmethod
     def _validate_quote(symbol: str, bid: Decimal, ask: Decimal) -> None:
@@ -549,8 +548,8 @@ class PaperBroker(Broker):
             raise OrderRejected("invalid market quote")
 
     @staticmethod
-    def _insert_trade(connection: sqlite3.Connection, trade: Trade) -> None:
-        connection.execute(
+    def _insert_trade(connection: sqlite3.Connection, trade: Trade) -> int:
+        cursor = connection.execute(
             """
             INSERT INTO trades (
                 timestamp, symbol, side, raw_bid, raw_ask, execution_price,
@@ -577,6 +576,7 @@ class PaperBroker(Broker):
                 trade.received_at,
             ),
         )
+        return int(cursor.lastrowid)
 
     def trades(
         self, limit: int = 100, session_id: str | None | object = ALL_SESSIONS
@@ -614,6 +614,7 @@ class PaperBroker(Broker):
     @staticmethod
     def _row_to_trade(row: sqlite3.Row) -> Trade:
         return Trade(
+            id=row["id"],
             timestamp=row["timestamp"],
             symbol=row["symbol"],
             side=row["side"],

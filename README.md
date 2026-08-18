@@ -1,6 +1,6 @@
 # MarketPiggy
 
-MarketPiggy is a local-only cryptocurrency paper-trading simulator. Milestone 2 adds public near-live Coinbase Advanced Trade bid/ask data, a lightweight rolling market scanner, stale-quote safety, and sampled observations while preserving the Milestone 1 paper broker and SQLite accounting.
+MarketPiggy is a local-only cryptocurrency paper-trading simulator. Milestone 3 adds one deliberately simple, deterministic baseline momentum strategy on top of the public market-data scanner and SQLite paper broker.
 
 ## Run locally on Windows
 
@@ -48,6 +48,42 @@ $env:MARKETPIGGY_DB = "data/marketpiggy.db"
 
 `MARKETPIGGY_STARTING_BALANCE` is only the first-database default. The dashboard can start or reset a simulation with another positive balance while retaining trade history.
 
+## Paper-only autopilot
+
+The dashboard has one compact **Autopilot** control for `Baseline Momentum v1.0`. It is always **OFF after the app starts**, regardless of its prior state. Turning it on requires checking the paper-only confirmation. Turning it off immediately stops future autonomous actions and does not liquidate an open position. Starting or resetting a simulation also turns autopilot off; existing trade and strategy-decision history remains in SQLite.
+
+The strategy can hold only one asset and never pyramids. With no position it chooses the symbol with the strongest qualifying 60-second momentum (alphabetical symbol breaks an exact tie), then invests 25% of available paper cash. With a position it evaluates exits in this order: stop loss, take profit, maximum holding time, then momentum reversal. A completed sell starts a re-entry cooldown.
+
+Exact defaults:
+
+| Parameter | Default | Environment variable |
+|---|---:|---|
+| Entry momentum | `+0.20%` | `MARKETPIGGY_STRATEGY_ENTRY_MOMENTUM_PCT` |
+| Maximum spread | `0.20%` | `MARKETPIGGY_STRATEGY_MAX_SPREAD_PCT` |
+| Maximum interval volatility | `0.35%` | `MARKETPIGGY_STRATEGY_MAX_VOLATILITY_PCT` |
+| Position size | `25%` of available cash | `MARKETPIGGY_STRATEGY_POSITION_FRACTION` |
+| Stop loss | `1.00%` below average entry (current bid) | `MARKETPIGGY_STRATEGY_STOP_LOSS_PCT` |
+| Take profit | `1.50%` above average entry (current bid) | `MARKETPIGGY_STRATEGY_TAKE_PROFIT_PCT` |
+| Maximum hold | `900` seconds | `MARKETPIGGY_STRATEGY_MAX_HOLD_SECONDS` |
+| Momentum reversal | `-0.10%` | `MARKETPIGGY_STRATEGY_REVERSAL_PCT` |
+| Evaluation interval | `3` seconds | `MARKETPIGGY_STRATEGY_EVALUATION_SECONDS` |
+| Post-exit cooldown | `60` seconds | `MARKETPIGGY_STRATEGY_COOLDOWN_SECONDS` |
+| Minimum observations | `5` in the rolling window | `MARKETPIGGY_STRATEGY_MIN_OBSERVATIONS` |
+
+Invalid configuration fails clearly during startup. Strategy decisions are persisted with the simulation session, strategy/version, action, reason code and explanation, signal values, execution result, and resulting trade ID. Repeated non-executed `HOLD`/`SKIP` outcomes with the same reason and symbol are logged at most once per 30 seconds, and the log is bounded to the newest 1,000 records.
+
+### Deterministic offline smoke test
+
+This mode uses the normal GUI and the explicitly fake static provider. The fixed `+0.10%` change per quote makes an entry predictable without weakening the positive-momentum rule:
+
+```powershell
+$env:MARKETPIGGY_MARKET_PROVIDER = "static"
+$env:MARKETPIGGY_STATIC_MOVE_PCT = "0.10"
+uvicorn app.main:app
+```
+
+Open the dashboard, start/reset the paper simulation if desired, check **Paper trades only**, and turn autopilot on. After five observations, the strategy deterministically buys 25% of paper cash in the strongest qualifying symbol (alphabetical symbol order breaks an exact computed tie). Watch the status and decision reason change from `Watching` to `Holding`; the fixed upward feed will eventually exercise the take-profit exit and `Cooldown`. Turn autopilot off to confirm that it takes no further actions and leaves any position unchanged, then stop with `Ctrl+C`. This setting is only a deterministic fake-feed aid; omit `MARKETPIGGY_STATIC_MOVE_PCT` for the normal randomized static simulation.
+
 ## Safety and reconnect behavior
 
 The default stale threshold is 15 seconds. A quote becomes unsafe when it exceeds that age or immediately when the live WebSocket disconnects. Unsafe quotes remain visibly marked stale, but paper buy and sell requests are rejected with a clear error. Fake prices are not used as a fallback.
@@ -61,7 +97,7 @@ The scanner keeps a rolling 60-second in-memory quote window:
 - short-term return is the percent change from the oldest to newest midpoint in the window
 - volatility is the population standard deviation of consecutive midpoint returns in that window
 
-Current bid, ask, spread, return, volatility, quote age, and freshness appear in the dashboard. These metrics are informational only and do not trigger trades.
+Current bid, ask, spread, return, volatility, quote age, and freshness appear in the dashboard. They remain informational unless the user explicitly turns on the single paper-only autopilot.
 
 Current observations are sampled to the local SQLite database at most once per second per sampling pass. Each pass stores one snapshot for every currently available symbol, rather than every WebSocket tick. The stored fields are sample time, provider timestamp, provider, symbol, bid, ask, midpoint, and spread. This is a replay foundation, not a full tick archive.
 
@@ -79,8 +115,8 @@ The automated suite uses fixture messages and temporary databases; it does not c
 pytest
 ```
 
-To smoke-test the public live feed, run the app in default Coinbase mode and watch the provider panel change to `LIVE / Connected`, quote ages remain fresh, and scanner values update. The `/api/market` endpoint exposes the same current status and values for inspection.
+To observe the public live feed, run the app in default Coinbase mode and watch the provider panel change to `LIVE / Connected`, quote ages remain fresh, and scanner values update. Autopilot remains off until explicitly enabled. The `/api/market` and `/api/strategy` endpoints expose the current feed and runner status. If the socket disconnects or quotes become stale, autonomous entries and exits are blocked—there is no fake-data fallback.
 
 ## Milestone status and boundaries
 
-Milestone 2 is paper trading only. It contains no exchange or brokerage order execution, Coinbase account integration, Robinhood credentials, automated strategies, strategy scoring, ML/LLM decisions, or real-money path. Manual paper orders continue to execute from current ask/bid plus adverse simulated friction only when market data is fresh.
+Milestone 3 is paper trading only. It contains no exchange or brokerage order execution, Coinbase account integration, Robinhood credentials, multiple strategies, ML/LLM decisions, backtesting/replay, or real-money path. Both manual and autonomous paper orders execute through the same `PaperBroker` from current ask/bid plus adverse simulated friction, and only when market data is fresh.

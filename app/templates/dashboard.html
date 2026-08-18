@@ -18,6 +18,23 @@
         <div id="connection-state">{{ 'Connected' if provider_status.connected else 'Disconnected / connecting' }}{% if provider_status.last_update %} • Last update {{ provider_status.last_update.strftime('%H:%M:%S') }} UTC{% endif %}</div>
         {% if provider_status.error %}<small id="provider-error">{{ provider_status.error }}</small>{% else %}<small id="provider-error"></small>{% endif %}
     </section>
+    <section id="strategy-status" class="strategy-status {{ 'enabled' if strategy_status.enabled else 'disabled' }}">
+        <div>
+            <span id="autopilot-badge" class="autopilot-badge">AUTOPILOT {{ 'ON' if strategy_status.enabled else 'OFF' }}</span>
+            <strong>{{ strategy_status.strategy }} v{{ strategy_status.version }}</strong>
+            <span id="strategy-state">• {{ strategy_status.state }}</span>
+            <span id="strategy-decision">• Last: {% if strategy_status.last_action %}{{ strategy_status.last_action }}{% if strategy_status.last_symbol %} {{ strategy_status.last_symbol }}{% endif %}{% else %}—{% endif %}</span>
+            <small id="strategy-reason">{{ strategy_status.last_reason }}</small>
+        </div>
+        {% if strategy_status.enabled %}
+        <form method="post" action="/autopilot/disable"><button class="autopilot-off" type="submit">Turn Off</button></form>
+        {% else %}
+        <form method="post" action="/autopilot/enable" class="autopilot-form">
+            <label><input type="checkbox" name="confirm_paper" value="yes" required> Paper trades only</label>
+            <button type="submit">Turn On</button>
+        </form>
+        {% endif %}
+    </section>
     {% if message %}<section class="flash success">{{ message }}</section>{% endif %}
     {% if error %}<section class="flash error">{{ error }}</section>{% endif %}
 
@@ -32,7 +49,7 @@
 
     <details class="panel reset-panel">
         <summary>Start or reset simulation</summary>
-        <p>Choose a new paper balance. This resets current cash, holdings, cost basis, and P/L. <strong>Existing trade history is preserved.</strong></p>
+        <p>Choose a new paper balance. This resets current cash, holdings, cost basis, and P/L and turns autopilot off. <strong>Existing trade and decision history is preserved.</strong></p>
         <form method="post" action="/simulation/reset" class="reset-form">
             <label>New starting balance <span class="money-input"><span>$</span><input name="starting_balance" type="number" min="0.01" max="1000000000" step="0.01" value="10.00" required></span></label>
             <label class="confirmation"><input name="confirm_reset" type="checkbox" value="yes" required> I understand the current portfolio state and P/L will be reset.</label>
