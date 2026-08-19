@@ -17,6 +17,12 @@ from app.market_data.coinbase_provider import CoinbaseProvider, DEFAULT_SYMBOLS
 from app.market_data.observations import ObservationSampler, ObservationStore
 from app.market_data.scanner import MarketScanner, ScannerRow
 from app.market_data.static_provider import StaticMarketDataProvider
+from app.strategy import (
+    BaselineMomentumStrategy,
+    DecisionStore,
+    StrategyConfig,
+    StrategyRunner,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,7 +45,10 @@ if PROVIDER_MODE == "coinbase":
         scanner=scanner,
     )
 elif PROVIDER_MODE == "static":
-    market_data = StaticMarketDataProvider(scanner=scanner)
+    static_move = os.getenv("MARKETPIGGY_STATIC_MOVE_PCT")
+    market_data = StaticMarketDataProvider(
+        scanner=scanner, deterministic_move_pct=static_move
+    )
     configured_symbols = market_data.symbols
 else:
     raise RuntimeError("MARKETPIGGY_MARKET_PROVIDER must be 'coinbase' or 'static'")
@@ -54,15 +63,34 @@ observation_store = ObservationStore(
     sample_interval_seconds=float(os.getenv("MARKETPIGGY_OBSERVATION_SECONDS", "1")),
 )
 observation_sampler = ObservationSampler(market_data, observation_store)
+strategy_config = StrategyConfig(
+    entry_momentum_pct=os.getenv("MARKETPIGGY_STRATEGY_ENTRY_MOMENTUM_PCT", "0.20"),
+    max_spread_pct=os.getenv("MARKETPIGGY_STRATEGY_MAX_SPREAD_PCT", "0.20"),
+    max_volatility_pct=os.getenv("MARKETPIGGY_STRATEGY_MAX_VOLATILITY_PCT", "0.35"),
+    position_size_fraction=os.getenv("MARKETPIGGY_STRATEGY_POSITION_FRACTION", "0.25"),
+    stop_loss_pct=os.getenv("MARKETPIGGY_STRATEGY_STOP_LOSS_PCT", "1.00"),
+    take_profit_pct=os.getenv("MARKETPIGGY_STRATEGY_TAKE_PROFIT_PCT", "1.50"),
+    max_holding_seconds=int(os.getenv("MARKETPIGGY_STRATEGY_MAX_HOLD_SECONDS", "900")),
+    reversal_momentum_pct=os.getenv("MARKETPIGGY_STRATEGY_REVERSAL_PCT", "-0.10"),
+    evaluation_interval_seconds=float(os.getenv("MARKETPIGGY_STRATEGY_EVALUATION_SECONDS", "3")),
+    cooldown_seconds=int(os.getenv("MARKETPIGGY_STRATEGY_COOLDOWN_SECONDS", "60")),
+    minimum_observations=int(os.getenv("MARKETPIGGY_STRATEGY_MIN_OBSERVATIONS", "5")),
+)
+decision_store = DecisionStore(DATABASE_PATH)
+strategy_runner = StrategyRunner(
+    BaselineMomentumStrategy(strategy_config), market_data, scanner, broker, decision_store
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await market_data.start()
     await observation_sampler.start()
+    await strategy_runner.start()
     try:
         yield
     finally:
+        await strategy_runner.stop()
         await observation_sampler.stop()
         await market_data.stop()
 
@@ -133,6 +161,7 @@ async def dashboard(request: Request):
             "provider_mode": PROVIDER_MODE,
             "configured_symbols": configured_symbols,
             "stale_after_seconds": market_data.stale_after_seconds,
+            "strategy_status": strategy_runner.status(),
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
@@ -146,12 +175,27 @@ async def reset_simulation(
     if confirm_reset != "yes":
         return _redirect("Confirm the portfolio reset before continuing", error=True)
     try:
+        strategy_runner.disable()
         broker.start_new_simulation(starting_balance, preserve_history=True)
     except OrderRejected as exc:
         return _redirect(str(exc), error=True)
     return _redirect(
-        f"Started a new paper simulation with ${starting_balance}; trade history was preserved"
+        f"Started a new paper simulation with ${starting_balance}; trade history was preserved and autopilot is off"
     )
+
+
+@app.post("/autopilot/enable")
+async def enable_autopilot(confirm_paper: str | None = Form(None)):
+    if confirm_paper != "yes":
+        return _redirect("Confirm paper-only autonomous trading before enabling", error=True)
+    strategy_runner.enable()
+    return _redirect("Paper-only autopilot enabled")
+
+
+@app.post("/autopilot/disable")
+async def disable_autopilot():
+    strategy_runner.disable()
+    return _redirect("Autopilot disabled; any open position was left unchanged")
 
 
 @app.post("/trade/buy")
@@ -208,6 +252,11 @@ async def market():
             for row in _current_rows()
         ],
     }
+
+
+@app.get("/api/strategy")
+async def strategy_status():
+    return strategy_runner.status()
 
 
 @app.get("/health")

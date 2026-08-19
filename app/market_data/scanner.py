@@ -47,5 +47,10 @@ class MarketScanner:
         volatility = pstdev(interval_returns) if len(interval_returns) >= 2 else 0.0
         return short_return, Decimal(str(volatility))
 
+    def observation_count(self, symbol: str) -> int:
+        """Return the number of samples currently inside the rolling window."""
+        with self._lock:
+            return len(self._observations.get(symbol, ()))
+
     def rows(self, quotes: list[MarketQuote]) -> list[ScannerRow]:
         return [ScannerRow(quote, *self.metrics(quote.symbol)) for quote in quotes]

@@ -1,5 +1,5 @@
 (() => {
-    if (document.body.dataset.liveProvider !== "true") return;
+    const liveProvider = document.body.dataset.liveProvider === "true";
 
     const money = (value) => {
         const number = Number(value);
@@ -11,6 +11,7 @@
     };
 
     async function refreshMarket() {
+        if (!liveProvider) return;
         try {
             const response = await fetch("/api/market", { cache: "no-store" });
             if (!response.ok) return;
@@ -53,6 +54,25 @@
         }
     }
 
+    async function refreshStrategy() {
+        try {
+            const response = await fetch("/api/strategy", { cache: "no-store" });
+            if (!response.ok) return;
+            const data = await response.json();
+            const panel = document.querySelector("#strategy-status");
+            panel.classList.toggle("enabled", data.enabled);
+            panel.classList.toggle("disabled", !data.enabled);
+            document.querySelector("#autopilot-badge").textContent = `AUTOPILOT ${data.enabled ? "ON" : "OFF"}`;
+            document.querySelector("#strategy-state").textContent = `• ${data.state}`;
+            document.querySelector("#strategy-decision").textContent = `• Last: ${data.last_action || "—"}${data.last_symbol ? ` ${data.last_symbol}` : ""}`;
+            document.querySelector("#strategy-reason").textContent = data.last_reason;
+        } catch (_) {
+            // Keep the last server-rendered status.
+        }
+    }
+
     refreshMarket();
+    refreshStrategy();
     window.setInterval(refreshMarket, 2000);
+    window.setInterval(refreshStrategy, 2000);
 })();
