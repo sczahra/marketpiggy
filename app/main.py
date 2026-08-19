@@ -158,24 +158,116 @@ def _entry_evaluations(rows: list[ScannerRow]):
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+def _dashboard_data() -> dict[str, object]:
     rows = _current_rows()
     eligibility = _entry_evaluations(rows)
     quotes_by_symbol = {row.quote.symbol: row.quote for row in rows}
     unmarked = broker.portfolio()
-    mark_quote = quotes_by_symbol.get(unmarked.symbol) if unmarked.symbol else None
-    portfolio = broker.portfolio(mark_quote.bid if mark_quote else None)
+    held_quote = quotes_by_symbol.get(unmarked.symbol) if unmarked.symbol else None
+    portfolio = broker.portfolio(held_quote.bid if held_quote else None)
+    return {
+        "rows": rows,
+        "eligibility": eligibility,
+        "portfolio": portfolio,
+        "held_quote": held_quote,
+        "trades": broker.trades(),
+    }
+
+
+def _serialize_portfolio(portfolio) -> dict[str, object]:
+    return {
+        "starting_balance": str(portfolio.starting_balance),
+        "cash": str(portfolio.cash),
+        "symbol": portfolio.symbol,
+        "quantity": str(portfolio.quantity),
+        "average_entry_price": str(portfolio.average_entry_price),
+        "mark_value": str(portfolio.mark_value),
+        "realized_pl": str(portfolio.realized_pl),
+        "unrealized_pl": str(portfolio.unrealized_pl),
+        "total_value": str(portfolio.total_value),
+        "total_return_pct": str(portfolio.total_return_pct),
+    }
+
+
+def _serialize_trade(trade) -> dict[str, object]:
+    return {
+        "id": trade.id,
+        "timestamp": trade.timestamp,
+        "context": trade.context_label,
+        "side": trade.side,
+        "symbol": trade.symbol,
+        "quantity": str(trade.quantity),
+        "execution_price": str(trade.execution_price),
+        "raw_bid": str(trade.raw_bid),
+        "raw_ask": str(trade.raw_ask),
+        "resulting_cash": str(trade.resulting_cash),
+        "session_id": trade.session_id,
+        "provider_name": trade.provider_name,
+        "quote_timestamp": trade.quote_timestamp,
+        "received_at": trade.received_at,
+    }
+
+
+def _serialize_rows(rows, eligibility, portfolio) -> list[dict[str, object]]:
+    return [
+        {
+            **_serialize_quote(row.quote),
+            "short_return_pct": str(row.short_return_pct),
+            "volatility_pct": str(row.volatility_pct),
+            "synthetic_test": row.quote.provider == TEST_PROVIDER_NAME,
+            "held": portfolio.symbol == row.quote.symbol,
+            "manual_buy_enabled": (
+                not row.quote.stale
+                and portfolio.cash > 0
+                and portfolio.symbol in (None, row.quote.symbol)
+            ),
+            "eligibility": {
+                "light": eligibility[row.quote.symbol].light,
+                "explanation": eligibility[row.quote.symbol].explanation,
+                "eligible": eligibility[row.quote.symbol].eligible,
+            },
+        }
+        for row in rows
+    ]
+
+
+def _serialize_open_position(portfolio, held_quote, provider_status):
+    if not portfolio.symbol:
+        return None
+    if portfolio.symbol == "TEST":
+        note = "Synthetic TEST data is paper-only and available only while TEST is enabled."
+    elif provider_status.live:
+        note = (
+            "A stale or disconnected feed blocks selling after "
+            f"{int(market_data.stale_after_seconds)} seconds."
+        )
+    else:
+        note = "Static mode remains explicitly simulated and available offline."
+    return {
+        "symbol": portfolio.symbol,
+        "quantity": str(portfolio.quantity),
+        "average_entry_price": str(portfolio.average_entry_price),
+        "mark_bid": str(held_quote.bid) if held_quote else None,
+        "close_available": bool(held_quote and not held_quote.stale),
+        "note": note,
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    data = _dashboard_data()
+    rows = data["rows"]
+    portfolio = data["portfolio"]
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
             "portfolio": portfolio,
             "active_session": broker.active_session(),
-            "held_quote": mark_quote,
+            "held_quote": data["held_quote"],
             "rows": rows,
-            "eligibility": eligibility,
-            "trades": broker.trades(),
+            "eligibility": data["eligibility"],
+            "trades": data["trades"],
             "friction_rate": broker.friction_rate,
             "reset_count": broker.reset_count(),
             "provider_status": market_data.status(),
@@ -263,30 +355,36 @@ async def quotes():
 
 @app.get("/api/market")
 async def market():
-    rows = _current_rows()
-    eligibility = _entry_evaluations(rows)
+    data = _dashboard_data()
+    rows = data["rows"]
     return {
         "provider": _serialize_status(market_data.status()),
-        "quotes": [
-            {
-                **_serialize_quote(row.quote),
-                "short_return_pct": str(row.short_return_pct),
-                "volatility_pct": str(row.volatility_pct),
-                "synthetic_test": row.quote.provider == TEST_PROVIDER_NAME,
-                "eligibility": {
-                    "light": eligibility[row.quote.symbol].light,
-                    "explanation": eligibility[row.quote.symbol].explanation,
-                    "eligible": eligibility[row.quote.symbol].eligible,
-                },
-            }
-            for row in rows
-        ],
+        "quotes": _serialize_rows(rows, data["eligibility"], data["portfolio"]),
     }
 
 
 @app.get("/api/strategy")
 async def strategy_status():
     return strategy_runner.status()
+
+
+@app.get("/api/dashboard")
+async def dashboard_state():
+    data = _dashboard_data()
+    portfolio = data["portfolio"]
+    provider_status = market_data.status()
+    return {
+        "provider": _serialize_status(provider_status),
+        "portfolio": _serialize_portfolio(portfolio),
+        "open_position": _serialize_open_position(
+            portfolio, data["held_quote"], provider_status
+        ),
+        "quotes": _serialize_rows(
+            data["rows"], data["eligibility"], portfolio
+        ),
+        "strategy": strategy_runner.status(),
+        "trades": [_serialize_trade(trade) for trade in data["trades"]],
+    }
 
 
 @app.get("/health")

@@ -102,6 +102,23 @@ uvicorn app.main:app
 
 In the enabled run, open the dashboard and explicitly turn Autopilot on. Watch TEST move red → yellow → green, receive a normal autonomous paper buy, then exit through `TAKE_PROFIT` and enter `Cooldown`. Restarting with `MARKETPIGGY_TEST_COIN` unset (or set to `0`) removes TEST and restores normal operation. Only `0` and `1` are accepted.
 
+### Live dashboard refresh
+
+The open dashboard makes one read-only request to `/api/dashboard` every two seconds. That single non-overlapping polling loop updates portfolio value, cash, holding details, realized and unrealized P/L, total return, the open-position mark and close controls, scanner values and unchanged eligibility lights, Autopilot status and evaluation recency, and the newest-first Trade Log. A transient read error leaves the last good values visible and retries on the next interval.
+
+When a position is open, its scanner row receives a restrained highlight and `HOLDING` badge. A newly observed paper fill is inserted without a page reload, briefly highlights its Trade Log row, and shows a compact `BOUGHT SYMBOL` or `SOLD SYMBOL` cue. JavaScript only renders server-provided state; it contains no strategy evaluation, order selection, pricing, or execution logic.
+
+Short browser smoke test:
+
+1. Start MarketPiggy and leave the dashboard open without refreshing it.
+2. Explicitly enable Autopilot.
+3. Confirm scanner values and `Evaluated … ago` continue changing.
+4. When a paper trade occurs, confirm the cards and open-position panel update, the held scanner row shows `HOLDING`, and the new Trade Log row briefly highlights.
+5. Confirm a later exit removes the open-position panel, updates P/L, and adds the newest SELL row.
+6. Stop cleanly with `Ctrl+C`.
+
+The temporary TEST mode above provides a deterministic buy, take-profit exit, and cooldown for this smoke test.
+
 ### Deterministic offline smoke test
 
 This mode uses the normal GUI and the explicitly fake static provider. The fixed `+0.10%` change per quote makes an entry predictable without weakening the positive-momentum rule:
