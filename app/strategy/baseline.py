@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.strategy.base import Decision, Strategy, StrategyConfig, StrategyInput
+from app.strategy.base import (
+    Decision,
+    EntryEvaluation,
+    Strategy,
+    StrategyConfig,
+    StrategyInput,
+)
 
 
 class BaselineMomentumStrategy(Strategy):
@@ -22,6 +28,24 @@ class BaselineMomentumStrategy(Strategy):
             "volatility_pct": str(row.volatility_pct),
             "quote_age_seconds": str(round(row.quote.age_seconds, 3)),
         }
+
+    def evaluate_entry(self, row, observation_count: int) -> EntryEvaluation:
+        """Evaluate entry rules once for both trading and presentation."""
+        quote = row.quote
+        if quote.stale:
+            return EntryEvaluation(quote.symbol, (), "Stale quote")
+        if quote.bid <= 0 or quote.ask < quote.bid:
+            return EntryEvaluation(quote.symbol, (), "Unusable quote")
+        failures: list[str] = []
+        if observation_count < self.config.minimum_observations:
+            failures.append("HISTORY")
+        if row.short_return_pct < self.config.entry_momentum_pct:
+            failures.append("MOMENTUM")
+        if quote.spread_pct > self.config.max_spread_pct:
+            failures.append("SPREAD")
+        if row.volatility_pct > self.config.max_volatility_pct:
+            failures.append("VOLATILITY")
+        return EntryEvaluation(quote.symbol, tuple(failures))
 
     def decide(self, snapshot: StrategyInput) -> Decision:
         config = self.config
@@ -53,15 +77,20 @@ class BaselineMomentumStrategy(Strategy):
                 return Decision("SELL", symbol, "MOMENTUM_REVERSAL", f"Momentum {row.short_return_pct:.3f}% fell to the {config.reversal_momentum_pct}% reversal level", signals)
             return Decision("HOLD", symbol, "POSITION_HELD", "Position remains inside all exit limits", signals)
 
-        fresh = [row for row in snapshot.rows if not row.quote.stale]
-        if not fresh:
+        evaluations = {
+            row.quote.symbol: self.evaluate_entry(
+                row, snapshot.observation_counts.get(row.quote.symbol, 0)
+            )
+            for row in snapshot.rows
+        }
+        safe = [
+            row for row in snapshot.rows
+            if evaluations[row.quote.symbol].safety_reason is None
+        ]
+        if not safe:
             return Decision("SKIP", None, "NO_FRESH_QUOTES", "No fresh executable quotes are available")
         eligible = [
-            row for row in fresh
-            if snapshot.observation_counts.get(row.quote.symbol, 0) >= config.minimum_observations
-            and row.short_return_pct >= config.entry_momentum_pct
-            and row.quote.spread_pct <= config.max_spread_pct
-            and row.volatility_pct <= config.max_volatility_pct
+            row for row in safe if evaluations[row.quote.symbol].eligible
         ]
         if not eligible:
             return Decision("HOLD", None, "NO_ENTRY", "No asset passes momentum, history, spread, and volatility rules")

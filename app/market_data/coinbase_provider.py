@@ -51,6 +51,8 @@ class CoinbaseProvider(MarketDataProvider):
         normalized = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
         if not normalized or any(not symbol.isalnum() for symbol in normalized):
             raise ValueError("Coinbase symbols must be non-empty alphanumeric codes")
+        if "TEST" in normalized:
+            raise ValueError("TEST is reserved for synthetic paper verification data")
         self.symbols = normalized
         self.product_ids = tuple(f"{symbol}-USD" for symbol in normalized)
         self._product_to_symbol = dict(zip(self.product_ids, normalized))

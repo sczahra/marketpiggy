@@ -72,6 +72,36 @@ Exact defaults:
 
 Invalid configuration fails clearly during startup. Strategy decisions are persisted with the simulation session, strategy/version, action, reason code and explanation, signal values, execution result, and resulting trade ID. Repeated non-executed `HOLD`/`SKIP` outcomes with the same reason and symbol are logged at most once per 30 seconds, and the log is bounded to the newest 1,000 records.
 
+### Scanner eligibility lights
+
+The small light beside every scanner symbol comes from `BaselineMomentumStrategy`'s own entry-rule evaluation—the dashboard does not maintain a second eligibility engine:
+
+- **Green:** the quote is fresh and usable, and history, momentum, spread, and volatility all pass.
+- **Yellow:** the quote is fresh and usable, but exactly one of those four normal entry rules fails.
+- **Red:** two or more normal entry rules fail, or the quote is stale/disconnected/unusable.
+
+Hover or tap the light for a compact explanation such as `Eligible`, `Waiting for history`, `Momentum below threshold`, or `2 rules failing`. Lights describe entry-signal eligibility only; Autopilot can still be off, in cooldown, or already holding a position.
+
+### Temporary synthetic TEST coin
+
+`TEST` is an obviously synthetic, paper-only verification symbol. It is **OFF by default**, is never requested from Coinbase, and never replaces a missing or stale Coinbase quote. When enabled, it is labeled `TEST DATA ENABLED` and `SYNTHETIC`, uses provider provenance `Synthetic TEST data`, and follows the same scanner, strategy rules, freshness enforcement, `StrategyRunner`, and `PaperBroker` path as every other paper trade.
+
+The TEST feed rises deterministically by `0.40%` per generated observation with a `0.05%` spread. It therefore progresses naturally from red (history and momentum fail), through yellow (only history fails), to green after the normal five-observation minimum. Continued movement exercises the normal `TAKE_PROFIT` exit and cooldown; the strategy contains no TEST-specific bypass.
+
+Shortest verification workflow in PowerShell:
+
+```powershell
+# First stop Uvicorn with Ctrl+C, then enable TEST for one process run.
+$env:MARKETPIGGY_TEST_COIN = "1"
+uvicorn app.main:app
+
+# After observing the paper buy, exit, and cooldown, stop with Ctrl+C.
+Remove-Item Env:MARKETPIGGY_TEST_COIN
+uvicorn app.main:app
+```
+
+In the enabled run, open the dashboard and explicitly turn Autopilot on. Watch TEST move red → yellow → green, receive a normal autonomous paper buy, then exit through `TAKE_PROFIT` and enter `Cooldown`. Restarting with `MARKETPIGGY_TEST_COIN` unset (or set to `0`) removes TEST and restores normal operation. Only `0` and `1` are accepted.
+
 ### Deterministic offline smoke test
 
 This mode uses the normal GUI and the explicitly fake static provider. The fixed `+0.10%` change per quote makes an entry predictable without weakening the positive-momentum rule:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
@@ -17,6 +16,11 @@ from app.market_data.coinbase_provider import CoinbaseProvider, DEFAULT_SYMBOLS
 from app.market_data.observations import ObservationSampler, ObservationStore
 from app.market_data.scanner import MarketScanner, ScannerRow
 from app.market_data.static_provider import StaticMarketDataProvider
+from app.market_data.synthetic_test_coin import (
+    TEST_PROVIDER_NAME,
+    test_coin_enabled,
+    with_synthetic_test_coin,
+)
 from app.strategy import (
     BaselineMomentumStrategy,
     DecisionStore,
@@ -29,6 +33,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 DATABASE_PATH = os.getenv("MARKETPIGGY_DB", str(DATA_DIR / "marketpiggy.db"))
 PROVIDER_MODE = os.getenv("MARKETPIGGY_MARKET_PROVIDER", "coinbase").strip().lower()
+TEST_COIN_ENABLED = test_coin_enabled(os.getenv("MARKETPIGGY_TEST_COIN"))
 
 scanner = MarketScanner(window_seconds=60)
 if PROVIDER_MODE == "coinbase":
@@ -52,6 +57,10 @@ elif PROVIDER_MODE == "static":
     configured_symbols = market_data.symbols
 else:
     raise RuntimeError("MARKETPIGGY_MARKET_PROVIDER must be 'coinbase' or 'static'")
+
+if TEST_COIN_ENABLED:
+    market_data = with_synthetic_test_coin(market_data, scanner, enabled=True)
+    configured_symbols = market_data.symbols
 
 broker = PaperBroker(
     DATABASE_PATH,
@@ -77,8 +86,9 @@ strategy_config = StrategyConfig(
     minimum_observations=int(os.getenv("MARKETPIGGY_STRATEGY_MIN_OBSERVATIONS", "5")),
 )
 decision_store = DecisionStore(DATABASE_PATH)
+baseline_strategy = BaselineMomentumStrategy(strategy_config)
 strategy_runner = StrategyRunner(
-    BaselineMomentumStrategy(strategy_config), market_data, scanner, broker, decision_store
+    baseline_strategy, market_data, scanner, broker, decision_store
 )
 
 
@@ -139,9 +149,19 @@ def _serialize_status(status: ProviderStatus) -> dict[str, object]:
     }
 
 
+def _entry_evaluations(rows: list[ScannerRow]):
+    return {
+        row.quote.symbol: baseline_strategy.evaluate_entry(
+            row, scanner.observation_count(row.quote.symbol)
+        )
+        for row in rows
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     rows = _current_rows()
+    eligibility = _entry_evaluations(rows)
     quotes_by_symbol = {row.quote.symbol: row.quote for row in rows}
     unmarked = broker.portfolio()
     mark_quote = quotes_by_symbol.get(unmarked.symbol) if unmarked.symbol else None
@@ -154,6 +174,7 @@ async def dashboard(request: Request):
             "active_session": broker.active_session(),
             "held_quote": mark_quote,
             "rows": rows,
+            "eligibility": eligibility,
             "trades": broker.trades(),
             "friction_rate": broker.friction_rate,
             "reset_count": broker.reset_count(),
@@ -162,6 +183,7 @@ async def dashboard(request: Request):
             "configured_symbols": configured_symbols,
             "stale_after_seconds": market_data.stale_after_seconds,
             "strategy_status": strategy_runner.status(),
+            "test_coin_enabled": TEST_COIN_ENABLED,
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
@@ -241,6 +263,8 @@ async def quotes():
 
 @app.get("/api/market")
 async def market():
+    rows = _current_rows()
+    eligibility = _entry_evaluations(rows)
     return {
         "provider": _serialize_status(market_data.status()),
         "quotes": [
@@ -248,8 +272,14 @@ async def market():
                 **_serialize_quote(row.quote),
                 "short_return_pct": str(row.short_return_pct),
                 "volatility_pct": str(row.volatility_pct),
+                "synthetic_test": row.quote.provider == TEST_PROVIDER_NAME,
+                "eligibility": {
+                    "light": eligibility[row.quote.symbol].light,
+                    "explanation": eligibility[row.quote.symbol].explanation,
+                    "eligible": eligibility[row.quote.symbol].eligible,
+                },
             }
-            for row in _current_rows()
+            for row in rows
         ],
     }
 
