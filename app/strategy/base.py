@@ -79,6 +79,45 @@ class Decision:
     signals: dict[str, str] = field(default_factory=dict)
 
 
+ENTRY_RULE_LABELS = {
+    "HISTORY": "Waiting for history",
+    "MOMENTUM": "Momentum below threshold",
+    "SPREAD": "Spread too wide",
+    "VOLATILITY": "Volatility too high",
+}
+
+
+@dataclass(frozen=True)
+class EntryEvaluation:
+    """The single source of truth for strategy entry rules and UI lights."""
+
+    symbol: str
+    failed_rules: tuple[str, ...]
+    safety_reason: str | None = None
+
+    @property
+    def eligible(self) -> bool:
+        return self.safety_reason is None and not self.failed_rules
+
+    @property
+    def light(self) -> str:
+        if self.safety_reason or len(self.failed_rules) > 1:
+            return "red"
+        if self.failed_rules:
+            return "yellow"
+        return "green"
+
+    @property
+    def explanation(self) -> str:
+        if self.safety_reason:
+            return self.safety_reason
+        if not self.failed_rules:
+            return "Eligible"
+        if len(self.failed_rules) == 1:
+            return ENTRY_RULE_LABELS[self.failed_rules[0]]
+        return f"{len(self.failed_rules)} rules failing"
+
+
 class Strategy(ABC):
     name: str
     version: str

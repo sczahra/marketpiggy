@@ -14,7 +14,7 @@
 <main>
     <section class="warning">Simulation only. Live data never places exchange or brokerage orders.</section>
     <section id="provider-status" class="provider-status {{ 'connected' if provider_status.connected else 'disconnected' }}">
-        <div><span class="source-badge {{ 'live' if provider_status.live else 'static' }}">{{ 'LIVE' if provider_status.live else 'STATIC' }}</span> <strong id="provider-name">{{ provider_status.name }}</strong> <span class="session-label">• {{ active_session.label }}</span></div>
+        <div><span class="source-badge {{ 'live' if provider_status.live else 'static' }}">{{ 'LIVE' if provider_status.live else 'STATIC' }}</span> <strong id="provider-name">{{ provider_status.name }}</strong> <span class="session-label">• {{ active_session.label }}</span>{% if test_coin_enabled %} <span class="test-data-badge">TEST DATA ENABLED</span>{% endif %}</div>
         <div id="connection-state">{{ 'Connected' if provider_status.connected else 'Disconnected / connecting' }}{% if provider_status.last_update %} • Last update {{ provider_status.last_update.strftime('%H:%M:%S') }} UTC{% endif %}</div>
         {% if provider_status.error %}<small id="provider-error">{{ provider_status.error }}</small>{% else %}<small id="provider-error"></small>{% endif %}
     </section>
@@ -60,7 +60,7 @@
 
     {% if portfolio.symbol %}
     <section class="panel close-panel">
-        <div><h2>Open {{ portfolio.symbol }} Position</h2><p>Marked at the latest bid. {% if provider_status.live %}A stale or disconnected feed blocks selling after {{ stale_after_seconds|int }} seconds.{% else %}Static mode remains explicitly simulated and available offline.{% endif %}</p></div>
+        <div><h2>Open {{ portfolio.symbol }} Position</h2><p>Marked at the latest bid. {% if portfolio.symbol == 'TEST' %}Synthetic TEST data is paper-only and available only while TEST is enabled.{% elif provider_status.live %}A stale or disconnected feed blocks selling after {{ stale_after_seconds|int }} seconds.{% else %}Static mode remains explicitly simulated and available offline.{% endif %}</p></div>
         <form method="post" action="/trade/sell" class="trade-form">
             <input type="hidden" name="symbol" value="{{ portfolio.symbol }}">
             <label>Quantity <input name="quantity" type="number" min="0" max="{{ portfolio.quantity }}" step="any" value="{{ portfolio.quantity }}" required></label>
@@ -74,8 +74,8 @@
         <div class="table-wrap"><table>
             <thead><tr><th>Symbol</th><th>Bid</th><th>Ask</th><th>Spread</th><th>60s Return</th><th>Volatility</th><th>Age / Status</th><th>Paper Buy</th></tr></thead>
             <tbody id="market-rows">
-            {% for row in rows %}{% set quote = row.quote %}<tr data-symbol="{{ quote.symbol }}">
-                <td><strong>{{ quote.symbol }}</strong></td>
+            {% for row in rows %}{% set quote = row.quote %}{% set entry = eligibility[quote.symbol] %}<tr data-symbol="{{ quote.symbol }}">
+                <td><span data-field="eligibility" class="eligibility-light {{ entry.light }}" title="{{ entry.explanation }}" aria-label="{{ entry.explanation }}"></span><strong>{{ quote.symbol }}</strong>{% if quote.symbol == 'TEST' %} <span class="test-data-badge">SYNTHETIC</span>{% endif %}</td>
                 <td data-field="bid">${{ "%.6f"|format(quote.bid) }}</td>
                 <td data-field="ask">${{ "%.6f"|format(quote.ask) }}</td>
                 <td data-field="spread">{{ "%.3f"|format(quote.spread_pct) }}%</td>
